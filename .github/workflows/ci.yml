@@ -1,0 +1,99 @@
+name: Continuous Integration
+
+# Run automatically on PRs/pushes to main, and allow manual runs.
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+# This workflow does not require write access.
+permissions:
+  contents: read
+
+# Cancel older in-progress runs for the same workflow/ref.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+# Set environment variables for all jobs.
+env:
+  CI: true
+  NEXT_TELEMETRY_DISABLED: 1
+
+# Define the jobs to run in this workflow.
+jobs:
+  # Run checks in parallel via matrix.
+  checks:
+    name: ${{ matrix.name }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+
+      matrix:
+        include:
+          - name: Type Check
+            command: npm run typecheck
+          - name: Format Check
+            command: npm run format:check
+          - name: Lint
+            command: npm run lint
+
+    # Define the steps to run for each check.
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Install dependencies
+        run: npm ci --prefer-offline --no-audit
+
+      - name: Run check
+        run: ${{ matrix.command }}
+
+  # Run the build job after all checks have passed.
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    needs: checks
+
+    # Define the steps to run for the build job.
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Restore Next.js cache
+        uses: actions/cache@v4
+        with:
+          path: .next/cache
+          key: ${{ runner.os }}-nextjs-${{ hashFiles('package-lock.json') }}-${{ hashFiles('next.config.ts', 'tsconfig.json', 'src/**/*', 'app/**/*', 'components/**/*', 'lib/**/*', 'content/**/*', 'data/**/*', 'public/**/*') }}
+          restore-keys: |
+            ${{ runner.os }}-nextjs-${{ hashFiles('package-lock.json') }}-
+
+      - name: Install dependencies
+        run: npm ci --prefer-offline --no-audit
+
+      - name: Build
+        run: npm run build
